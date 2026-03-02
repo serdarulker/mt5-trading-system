@@ -3931,11 +3931,11 @@ subprocess.run([sys.executable, "{os.path.abspath(__file__)}", "--symbol", "{sym
     def run(self):
         self.log("MT5 Trading System v6.5 başlatıldı.")
         self.log(f"Symbol: {self.config.SYMBOL} | Mode: {self.config.TRADING_MODE}")
-        if self.model_path:
-            self._load_model_from_path(self.model_path)
+        if self._init_model_path:
+            self._load_model_from_path(self._init_model_path)
         else:
             self._auto_load_model()
-        if self.autostart:
+        if self._init_autostart:
             self.window.after(1500, self.start_live_trading)
         self.window.mainloop()
 
