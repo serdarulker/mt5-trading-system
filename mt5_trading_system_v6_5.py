@@ -3208,6 +3208,7 @@ class TradingGUI:
                 return
             info = mt5.terminal_info()
             self.log(f"MT5 connected: {info.name} build {info.build}")
+            self.mt5_fetcher.connected = True
             self.btn_connect.config(bg='#4CAF50', text="✅ Bağlı")
         except ImportError:
             self.log("MetaTrader5 package not installed — demo mode.")
