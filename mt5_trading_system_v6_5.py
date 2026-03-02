@@ -157,6 +157,14 @@ class Config:
         self.USE_SESSION_FILTER = False
         self.ALLOWED_SESSIONS = ['LONDON', 'NEW_YORK', 'OVERLAP_LONDON_NY']
         self.SYMBOL = "EURUSD"
+        # Timeframe / data settings
+        self.TIMEFRAMES = ['H4', 'H1', 'M15', 'M5']
+        self.LOOKBACK_BARS = 1000
+        self.INITIAL_CAPITAL = 10000.0
+        # Live trading settings
+        self.LOOP_INTERVAL_SECONDS = 1
+        self.MAGIC_NUMBER = 12345
+        self.REQUIRE_MANUAL_APPROVAL = False
         self.set_mode(mode)
 
     def set_mode(self, mode):
@@ -193,7 +201,7 @@ def timeframe_to_minutes(tf: str) -> int:
 # =============================================================================
 
 class MT5DataFetcher:
-    def __init__(self):
+    def __init__(self, config=None):
         self.connected = False
         self.terminal_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
 
@@ -2453,6 +2461,9 @@ class TradingGUI:
         self.multi_traders = {}
         self.multi_threads = {}
         self.pending_signal = None
+        self.is_trading = False
+        self.is_paused = False
+        self.live_traders = {}
         self._init_symbol = symbol
         self._init_model_path = model_path
         self._init_autostart = autostart
@@ -2840,6 +2851,9 @@ class TradingGUI:
         self.notebook.add(self.tab_trades, text='💰 Trades')
         self.tab_analysis = tk.Frame(self.notebook, bg='#2d2d2d')
         self.notebook.add(self.tab_analysis, text='📉 Analiz')
+        self.text_results = tk.Text(self.tab_analysis, bg='#1e1e1e', fg='#00BCD4',
+                                    font=('Courier', 8), wrap=tk.WORD, state=tk.DISABLED)
+        self.text_results.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
         self.tab_indicators = tk.Frame(self.notebook, bg='#2d2d2d')
         self.notebook.add(self.tab_indicators, text='🎯 İndikatör')
         self.tab_live = tk.Frame(self.notebook, bg='#2d2d2d')
@@ -3013,11 +3027,11 @@ class TradingGUI:
     # ─────────────────────────────────────────────────────────────────
     # Utility / sync helpers
     # ─────────────────────────────────────────────────────────────────
-    def _sync_entry(self, var, entry, fmt="{:.4f}"):
+    def _sync_entry(self, entry, val, fmt="{:.4f}"):
         try:
-            val = float(var.get())
+            v = float(val)
             entry.delete(0, tk.END)
-            entry.insert(0, fmt.format(val))
+            entry.insert(0, fmt.format(v))
         except Exception:
             pass
 
@@ -3035,12 +3049,12 @@ class TradingGUI:
     # Toggle callbacks
     # ─────────────────────────────────────────────────────────────────
     def _toggle_paper_trading(self):
-        self.config.PAPER_TRADING = bool(self.var_paper.get())
+        self.config.PAPER_TRADING = bool(self.var_paper_trading.get())
         mode = "PAPER" if self.config.PAPER_TRADING else "LIVE"
         self.log(f"Trading mode set to: {mode}")
 
     def _toggle_feature_selection(self):
-        self.config.USE_FEATURE_SELECTION = bool(self.var_feature_sel.get())
+        self.config.USE_FEATURE_SELECTION = bool(self.var_feature_selection.get())
 
     def _on_label_mode_change(self, *args):
         mode = self.var_label_mode.get()
@@ -3096,25 +3110,25 @@ class TradingGUI:
             w = getattr(self, attr, None)
             if w:
                 w.pack_forget()
-        if m == "Fixed":
+        if m == "FIXED":
             self.frame_fixed_lot.pack(fill=tk.X, padx=5, pady=1)
-        elif m == "Risk%":
+        elif m == "RISK_PCT":
             self.frame_risk_pct.pack(fill=tk.X, padx=5, pady=1)
-        elif m == "ATR":
+        elif m == "ATR_BASED":
             self.frame_atr_mult.pack(fill=tk.X, padx=5, pady=1)
 
     def _apply_lot_settings_to_config(self):
         try:
             mode = self.var_lot_mode.get()
-            if mode == "Fixed":
-                self.config.LOT_SIZE = float(self.entry_fixed_lot.get())
-                self.config.LOT_MODE = "fixed"
-            elif mode == "Risk%":
+            if mode == "FIXED":
+                self.config.FIXED_LOT = float(self.entry_fixed_lot.get())
+                self.config.LOT_MODE = "FIXED"
+            elif mode == "RISK_PCT":
                 self.config.LIVE_RISK_PCT = float(self.entry_live_risk.get()) / 100.0
-                self.config.LOT_MODE = "risk_pct"
-            elif mode == "ATR":
+                self.config.LOT_MODE = "RISK_PCT"
+            elif mode == "ATR_BASED":
                 self.config.ATR_SL_MULTIPLIER = float(self.entry_atr_sl_mult.get())
-                self.config.LOT_MODE = "atr"
+                self.config.LOT_MODE = "ATR_BASED"
             self.config.MAX_LOT = float(self.entry_max_lot.get())
         except Exception as e:
             self.log(f"Lot settings error: {e}")
@@ -3130,7 +3144,7 @@ class TradingGUI:
                 p = lt.get_current_price(sym)
                 if p:
                     price = p
-            lot = self.live_traders[sym].calculate_position_size(sym, atr, price) if sym in self.live_traders else self.config.LOT_SIZE
+            lot = self.live_traders[sym].calculate_position_size(sym, atr, price) if sym in self.live_traders else self.config.FIXED_LOT
             self.log(f"Preview lot for {sym} @ {price:.5f}: {lot:.2f}")
         except Exception as e:
             self.log(f"Preview error: {e}")
@@ -3222,8 +3236,9 @@ class TradingGUI:
 
     def reset_parameters(self):
         fresh = Config()
-        for attr in ["N_ESTIMATORS","MAX_DEPTH","MIN_SAMPLES_LEAF","CONFIDENCE_THRESHOLD",
-                     "TP_MULTIPLIER","SL_MULTIPLIER","LOT_SIZE","LIVE_RISK_PCT","MAX_LOT"]:
+        for attr in ["PROFIT_THRESHOLD", "MIN_CONFIDENCE", "FORWARD_PERIODS",
+                     "POSITION_RISK_PCT", "FIXED_LOT", "LIVE_RISK_PCT", "MAX_LOT",
+                     "USE_ADAPTIVE_STOPS"]:
             setattr(self.config, attr, getattr(fresh, attr))
         self.load_mode_parameters()
         self.log("Parameters reset to defaults.")
@@ -3236,10 +3251,20 @@ class TradingGUI:
             try:
                 self.log("Fetching data...")
                 self.set_progress(10, "Connecting...")
-                fetcher = MT5DataFetcher(self.config)
-                sym = self.config.SYMBOL
-                tfs = self.config.TIMEFRAMES
-                data = fetcher.fetch_multi_timeframe(sym, tfs, self.config.LOOKBACK_BARS)
+                sym = self.combo_symbol.get().strip() or self.config.SYMBOL
+                self.config.SYMBOL = sym
+                start = datetime.combine(self.date_start.get_date(), datetime.min.time())
+                end   = datetime.combine(self.date_end.get_date(),   datetime.max.time())
+
+                def prog_cb(name, idx, total):
+                    pct = 10 + int(80 * idx / total)
+                    self.set_progress(pct, f"Fetching {name}...")
+
+                data = self.mt5_fetcher.fetch_all_timeframes(
+                    sym, start, end,
+                    log_callback=self.log,
+                    mode=self.config.TRADING_MODE,
+                    progress_callback=prog_cb)
                 if not data:
                     self.log("No data returned.")
                     self.reset_progress()
@@ -3261,13 +3286,15 @@ class TradingGUI:
                 self.apply_parameters()
                 if not hasattr(self, 'data_dict') or not self.data_dict:
                     self.log("No data — fetching first...")
-                    fetcher = MT5DataFetcher()
-                    self.data_dict = fetcher.fetch_multi_timeframe(
-                        self.config.SYMBOL, self.config.TIMEFRAMES, self.config.LOOKBACK_BARS)
+                    start = datetime.combine(self.date_start.get_date(), datetime.min.time())
+                    end   = datetime.combine(self.date_end.get_date(),   datetime.max.time())
+                    self.data_dict = self.mt5_fetcher.fetch_all_timeframes(
+                        self.config.SYMBOL, start, end,
+                        log_callback=self.log, mode=self.config.TRADING_MODE)
                 self.log("Training model...")
                 self.set_progress(5, "Preparing features...")
                 self.model = MLModel(self.config)
-                ind = TechnicalIndicators(self.config)
+                ind = TechnicalIndicators()
 
                 def prog_cb(v, d=""):
                     self.set_progress(v, d)
@@ -3312,7 +3339,8 @@ class TradingGUI:
                     return
                 self.log("Running backtest...")
                 self.set_progress(10, "Backtesting...")
-                bt = Backtester(self.config, self.model, capital=self.config.INITIAL_CAPITAL)
+                capital = float(self.entry_capital.get()) if hasattr(self, 'entry_capital') else self.config.INITIAL_CAPITAL
+                bt = Backtester(capital, self.config)
                 res = bt.run(self.data_dict,
                              progress_callback=lambda v, d="": self.set_progress(v, d))
                 self.backtest_results = res
@@ -3376,7 +3404,7 @@ class TradingGUI:
     # ─────────────────────────────────────────────────────────────────
     def save_model_dialog(self):
         from tkinter import filedialog
-        if self.model is None or not self.model.is_trained:
+        if self.model is None or not self.model.trained:
             self.log("No trained model to save.")
             return
         path = filedialog.asksaveasfilename(
@@ -3527,18 +3555,22 @@ class TradingGUI:
         self.text_results.insert(tk.END, "\n".join(lines))
         self.text_results.config(state=tk.DISABLED)
 
-        # update summary tab labels
-        field_map = {
-            'lbl_total_trades': ('total_trades', '{}'),
-            'lbl_win_rate':     ('win_rate',     '{:.1%}'),
-            'lbl_pf':           ('profit_factor','{:.2f}'),
-            'lbl_sharpe':       ('sharpe_ratio', '{:.2f}'),
-            'lbl_drawdown':     ('max_drawdown', '{:.2%}'),
-            'lbl_net_profit':   ('net_profit',   '{:.2f}'),
+        # update summary tab metric cards
+        metric_fmt = {
+            'total_trades':   '{}',
+            'winning_trades': '{}',
+            'losing_trades':  '{}',
+            'win_rate':       '{:.1%}',
+            'profit_factor':  '{:.2f}',
+            'sharpe_ratio':   '{:.2f}',
+            'max_drawdown':   '{:.2%}',
+            'daily_max_dd':   '{:.2%}',
+            'total_return':   '{:.2%}',
         }
-        for attr, (key, fmt) in field_map.items():
-            lbl = getattr(self, attr, None)
-            if lbl:
+        for key, fmt in metric_fmt.items():
+            entry = self.metric_labels.get(key)
+            if entry:
+                lbl, _ = entry
                 try:
                     lbl.config(text=fmt.format(res.get(key, 0)))
                 except Exception:
@@ -3549,13 +3581,12 @@ class TradingGUI:
 
     def _log_indicator_summary(self, data_dict):
         try:
-            ind = TechnicalIndicators(self.config)
             df = data_dict.get('M15', data_dict.get(list(data_dict.keys())[0]))
-            df2 = ind.calculate_all(df)
+            df2 = TechnicalIndicators.calculate_all(df)
             last = df2.iloc[-1]
-            self.log(f"RSI={last.get('RSI',float('nan')):.1f} "
-                     f"MACD={last.get('MACD',float('nan')):.5f} "
-                     f"EMA9={last.get('EMA9',float('nan')):.5f}")
+            self.log(f"RSI={last.get('rsi', float('nan')):.1f} "
+                     f"MACD={last.get('macd_hist', float('nan')):.5f} "
+                     f"EMA9={last.get('ema_9', float('nan')):.5f}")
         except Exception:
             pass
 
@@ -3700,10 +3731,10 @@ subprocess.run([sys.executable, "{os.path.abspath(__file__)}", "--symbol", "{sym
         if self.is_trading:
             self.log("Already trading.")
             return
-        if self.model is None or not self.model.is_trained:
+        if self.model is None or not self.model.trained:
             self.log("No trained model — attempting auto-load...")
             self._auto_load_model()
-            if self.model is None or not self.model.is_trained:
+            if self.model is None or not self.model.trained:
                 self.log("Cannot start: no model.")
                 return
         self.apply_parameters()
@@ -3736,9 +3767,9 @@ subprocess.run([sys.executable, "{os.path.abspath(__file__)}", "--symbol", "{sym
             target=self.monitor_positions_loop, daemon=True)
         self._monitor_thread.start()
 
-        self.btn_start.config(state=tk.DISABLED)
-        self.btn_pause.config(state=tk.NORMAL)
-        self.btn_stop.config(state=tk.NORMAL)
+        self.btn_live_start.config(state=tk.DISABLED)
+        self.btn_live_pause.config(state=tk.NORMAL)
+        self.btn_live_stop.config(state=tk.NORMAL)
         paper = "PAPER" if self.config.PAPER_TRADING else "LIVE"
         syms_str = ", ".join(symbols)
         self.log(f"Trading started [{paper}]: {syms_str}")
@@ -3764,7 +3795,7 @@ subprocess.run([sys.executable, "{os.path.abspath(__file__)}", "--symbol", "{sym
         state = "PAUSED" if self.is_paused else "RESUMED"
         self.log(f"Trading {state}")
         txt = "▶ Devam" if self.is_paused else "⏸ Duraklat"
-        self.btn_pause.config(text=txt)
+        self.btn_live_pause.config(text=txt)
 
     def stop_live_trading(self):
         self.is_trading = False
@@ -3775,9 +3806,9 @@ subprocess.run([sys.executable, "{os.path.abspath(__file__)}", "--symbol", "{sym
             except Exception:
                 pass
         self.live_traders.clear()
-        self.btn_start.config(state=tk.NORMAL)
-        self.btn_pause.config(state=tk.DISABLED, text="⏸ Duraklat")
-        self.btn_stop.config(state=tk.DISABLED)
+        self.btn_live_start.config(state=tk.NORMAL)
+        self.btn_live_pause.config(state=tk.DISABLED, text="⏸ Duraklat")
+        self.btn_live_stop.config(state=tk.DISABLED)
         self.log("Trading stopped.")
 
     def emergency_stop(self):
