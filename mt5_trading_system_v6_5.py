@@ -3210,11 +3210,27 @@ class TradingGUI:
             self.log(f"MT5 connected: {info.name} build {info.build}")
             self.mt5_fetcher.connected = True
             self.btn_connect.config(bg='#4CAF50', text="✅ Bağlı")
+            self._populate_symbol_combo()
         except ImportError:
             self.log("MetaTrader5 package not installed — demo mode.")
             self.btn_connect.config(bg='#FF9800', text="⚠️ Demo")
         except Exception as e:
             self.log(f"MT5 error: {e}")
+
+    def _populate_symbol_combo(self):
+        try:
+            sym_dict = self.mt5_fetcher.get_available_symbols()
+            # Önce forex, sonra metals, sonra diğerleri
+            ordered = (sym_dict.get('forex', []) +
+                       sym_dict.get('metals', []) +
+                       sym_dict.get('crypto', []) +
+                       sym_dict.get('indices', []) +
+                       sym_dict.get('others', []))
+            if ordered:
+                self.combo_symbol['values'] = ordered
+                self.log(f"İzleme listesi yüklendi: {len(ordered)} sembol")
+        except Exception as e:
+            self.log(f"Sembol listesi yüklenemedi: {e}")
 
     def change_trading_mode(self):
         new_mode = self.trading_mode.get()
