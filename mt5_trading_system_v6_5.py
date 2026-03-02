@@ -2522,9 +2522,9 @@ class TradingGUI:
         conn_frame = tk.LabelFrame(parent, text="MT5 Bağlantı", bg='#2d2d2d', fg='white',
                                    font=('Arial', 9, 'bold'))
         conn_frame.pack(fill=tk.X, **pad)
-        tk.Button(conn_frame, text="🔌 MT5'e Bağlan", command=self.connect_mt5,
-                  bg='#4CAF50', fg='white', font=('Arial', 9, 'bold')).pack(
-                      pady=3, padx=5, fill=tk.X)
+        self.btn_connect = tk.Button(conn_frame, text="🔌 MT5'e Bağlan", command=self.connect_mt5,
+                  bg='#4CAF50', fg='white', font=('Arial', 9, 'bold'))
+        self.btn_connect.pack(pady=3, padx=5, fill=tk.X)
         self.lbl_connection = ttk.Label(conn_frame, text="Bağlı değil", foreground='red')
         self.lbl_connection.pack(pady=2)
 
