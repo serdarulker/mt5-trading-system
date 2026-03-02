@@ -3022,13 +3022,13 @@ class TradingGUI:
             pass
 
     def set_progress(self, val: int, detail: str = ""):
-        self.progress_var.set(val)
+        self.progress['value'] = val
         if detail:
             self.lbl_progress.config(text=detail)
         self.window.update_idletasks()
 
     def reset_progress(self):
-        self.progress_var.set(0)
+        self.progress['value'] = 0
         self.lbl_progress.config(text="")
 
     # ─────────────────────────────────────────────────────────────────
@@ -3210,12 +3210,11 @@ class TradingGUI:
 
     def apply_parameters(self):
         try:
-            self.config.N_ESTIMATORS   = int(self.slider_n_est.get())
-            self.config.MAX_DEPTH      = int(self.slider_depth.get())
-            self.config.MIN_SAMPLES_LEAF = int(self.slider_leaf.get())
-            self.config.CONFIDENCE_THRESHOLD = float(self.slider_conf.get())
-            self.config.TP_MULTIPLIER  = float(self.slider_tp.get())
-            self.config.SL_MULTIPLIER  = float(self.slider_sl.get())
+            self.config.PROFIT_THRESHOLD = float(self.scale_threshold.get()) / 100
+            self.config.MIN_CONFIDENCE   = float(self.scale_confidence.get()) / 100
+            self.config.FORWARD_PERIODS  = int(self.spin_forward.get())
+            self.config.POSITION_RISK_PCT = float(self.entry_risk.get()) / 100
+            self.config.USE_ADAPTIVE_STOPS = bool(self.var_adaptive.get())
             self._apply_lot_settings_to_config()
             self.log("Parameters applied.")
         except Exception as e:
@@ -3262,7 +3261,7 @@ class TradingGUI:
                 self.apply_parameters()
                 if not hasattr(self, 'data_dict') or not self.data_dict:
                     self.log("No data — fetching first...")
-                    fetcher = MT5DataFetcher(self.config)
+                    fetcher = MT5DataFetcher()
                     self.data_dict = fetcher.fetch_multi_timeframe(
                         self.config.SYMBOL, self.config.TIMEFRAMES, self.config.LOOKBACK_BARS)
                 self.log("Training model...")
