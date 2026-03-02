@@ -3202,11 +3202,8 @@ class TradingGUI:
             self.log(f"MT5 error: {e}")
 
     def change_trading_mode(self):
-        modes = list(self.config.TRADING_MODES.keys())
-        current = self.config.TRADING_MODE
-        idx = modes.index(current) if current in modes else 0
-        new_mode = modes[(idx + 1) % len(modes)]
-        self.config.TRADING_MODE = new_mode
+        new_mode = self.trading_mode.get()
+        self.config.set_mode(new_mode)
         self.log(f"Mode: {new_mode}")
         self.update_mode_description()
         self.load_mode_parameters()
