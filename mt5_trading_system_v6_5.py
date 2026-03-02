@@ -3358,7 +3358,7 @@ class TradingGUI:
                 self.set_progress(10, "Backtesting...")
                 capital = float(self.entry_capital.get()) if hasattr(self, 'entry_capital') else self.config.INITIAL_CAPITAL
                 bt = Backtester(capital, self.config)
-                res = bt.run(self.data_dict,
+                res = bt.run(self.data_dict, self.model,
                              progress_callback=lambda v, d="": self.set_progress(v, d))
                 self.backtest_results = res
                 self.log(f"Backtest done: {res.get('total_trades',0)} trades, "
