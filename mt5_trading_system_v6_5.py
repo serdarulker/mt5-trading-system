@@ -156,6 +156,7 @@ class Config:
         }
         self.USE_SESSION_FILTER = False
         self.ALLOWED_SESSIONS = ['LONDON', 'NEW_YORK', 'OVERLAP_LONDON_NY']
+        self.SYMBOL = "EURUSD"
         self.set_mode(mode)
 
     def set_mode(self, mode):
